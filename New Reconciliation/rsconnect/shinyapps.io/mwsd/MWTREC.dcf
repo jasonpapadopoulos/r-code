@@ -1,0 +1,13 @@
+name: MWTREC
+title: MWTREC
+username:
+account: mwsd
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 5509824
+bundleId: 6574312
+url: https://mwsd.shinyapps.io/MWTREC/
+when: 1669843040.77501
+asMultiple: FALSE
+asStatic: FALSE
+ignoredFiles: all_tabapay_chargebacks.csv|all_tabapay_transations.csv|bank_transactions_attribution_changes.csv|pre_july_bank_data.csv|pre_november_investor_ledger.csv|transactions_with_exceptions_data.csv
