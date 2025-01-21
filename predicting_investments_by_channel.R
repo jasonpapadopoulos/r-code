@@ -136,7 +136,6 @@ select
 from
     final_push_base"
 
-
 # get the data (takes a while, patience is a virtue)
 email_data <- dbGetQuery(con, email_query)
 push_data <- dbGetQuery(con, push_query)
