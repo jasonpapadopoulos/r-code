@@ -7,14 +7,39 @@ library(pROC)
 library(tidyr)
 library(RPostgreSQL)
 
+script_start <- Sys.time()
+
 # querying the warehouse
+# drv <- dbDriver("PostgreSQL")
+# con <- dbConnect(drv, dbname = "[DB_NAME]",
+#                  host = "[DB_HOST]",
+#                  port = 5439,  # Default Redshift port
+#                  user = "[DB_USER]",
+#                  password = "[DB_PASSWORD]")
 drv <- dbDriver("PostgreSQL")
-con <- dbConnect(drv, dbname = "[DB_NAME]",
-                 host = "[DB_HOST]",
+con <- dbConnect(drv, dbname = "prod",
+                 host = "mw-redshift-prod.ces2db0use8y.us-east-2.redshift.amazonaws.com",
                  port = 5439,  # Default Redshift port
-                 user = "[DB_USER]",
-                 password = "[DB_PASSWORD]")
+                 user = "dwuser_ro",
+                 password = "ercPzNjFvMiZ7SCi32nZW3H7scXYq2huQMea3BcDNUfZkVFd")
 email_query <- "with
+
+    campaigns_to_exclude_base as
+    
+        (select 
+            campaign,
+            count(distinct date(received_email_at)) as sent_times
+        from
+            raw_layer.aggregated_email_data 
+        where
+            campaign not like '%PE%'
+            and campaign not like '%Investor Recap%'
+            and campaign not in ('Q3 Shareholder Update - 100924 (Support)')
+            and campaign is not null
+        group by 1
+        having
+            sent_times > 2
+        ),
 
     investments_base as
 
@@ -43,6 +68,7 @@ email_query <- "with
             raw_layer.aggregated_email_data
        where
             user_id in (select distinct user_id from raw_layer.investor_offering_base)
+              and campaign not in (select campaign from campaigns_to_exclude_base)
         )
 
 select
@@ -91,7 +117,7 @@ push_query <- "with
             and coalesce(origin, 'not braze') <> 'Braze'
             and push_name is not null
             and (message_name not like '%test%' or message_name is null and message_name <> 'quiz_push_reminder2')
-            and implied_user_id in (select distinct user_id from raw_layer.investor_offering_base)
+            and implied_user_id in (select distinct user_id from raw_layer.investor_offering_base limit 100)
         group by 1,2
         ),
     
@@ -136,6 +162,7 @@ select
 from
     final_push_base"
 
+
 # get the data (takes a while, patience is a virtue)
 email_data <- dbGetQuery(con, email_query)
 push_data <- dbGetQuery(con, push_query)
@@ -168,6 +195,150 @@ email_data <- email_data %>%
     trailing_sess_rate = (rollsum(as.numeric(web_or_app_session), k = window_length + 1, fill = NA, align = 'left') - web_or_app_session) / window_length,
   ) %>%
   ungroup()
+
+setDT(email_data)
+setorder(email_data, user_id, received_email_at)
+
+email_data[, days_since_last_investment := {
+  # Get indices where investment occurred
+  inv_idx <- which(invested == 1)
+  
+  # Create a vector of the same length as the group
+  result <- rep(NA_real_, .N)
+  
+  if (length(inv_idx) > 0) {
+    # Handle first investment differently
+    if (inv_idx[1] > 1) {
+      result[1:inv_idx[1]] <- NA
+    }
+    
+    # For investments after the first one
+    if (length(inv_idx) > 1) {
+      for (i in 2:length(inv_idx)) {
+        # Fill in all rows between previous investment and current one
+        # (including the current investment row)
+        start_idx <- inv_idx[i-1] + 1
+        end_idx <- inv_idx[i]
+        result[start_idx:end_idx] <- received_email_at[inv_idx[i-1]]
+      }
+      
+      # Fill remaining rows after last investment
+      if (inv_idx[length(inv_idx)] < .N) {
+        result[(inv_idx[length(inv_idx)] + 1):.N] <- received_email_at[inv_idx[length(inv_idx)]]
+      }
+    }
+  }
+  result
+}, by = user_id]
+email_data[, days_since_last_open := {
+  # Get indices where investment occurred
+  inv_idx <- which(opened == 1)
+  
+  # Create a vector of the same length as the group
+  result <- rep(NA_real_, .N)
+  
+  if (length(inv_idx) > 0) {
+    # Handle first investment differently
+    if (inv_idx[1] > 1) {
+      result[1:inv_idx[1]] <- NA
+    }
+    
+    # For investments after the first one
+    if (length(inv_idx) > 1) {
+      for (i in 2:length(inv_idx)) {
+        # Fill in all rows between previous investment and current one
+        # (including the current investment row)
+        start_idx <- inv_idx[i-1] + 1
+        end_idx <- inv_idx[i]
+        result[start_idx:end_idx] <- received_email_at[inv_idx[i-1]]
+      }
+      
+      # Fill remaining rows after last investment
+      if (inv_idx[length(inv_idx)] < .N) {
+        result[(inv_idx[length(inv_idx)] + 1):.N] <- received_email_at[inv_idx[length(inv_idx)]]
+      }
+    }
+  }
+  result
+}, by = user_id]
+email_data[, days_since_last_click := {
+  # Get indices where investment occurred
+  inv_idx <- which(clicked_esp == 1)
+  
+  # Create a vector of the same length as the group
+  result <- rep(NA_real_, .N)
+  
+  if (length(inv_idx) > 0) {
+    # Handle first investment differently
+    if (inv_idx[1] > 1) {
+      result[1:inv_idx[1]] <- NA
+    }
+    
+    # For investments after the first one
+    if (length(inv_idx) > 1) {
+      for (i in 2:length(inv_idx)) {
+        # Fill in all rows between previous investment and current one
+        # (including the current investment row)
+        start_idx <- inv_idx[i-1] + 1
+        end_idx <- inv_idx[i]
+        result[start_idx:end_idx] <- received_email_at[inv_idx[i-1]]
+      }
+      
+      # Fill remaining rows after last investment
+      if (inv_idx[length(inv_idx)] < .N) {
+        result[(inv_idx[length(inv_idx)] + 1):.N] <- received_email_at[inv_idx[length(inv_idx)]]
+      }
+    }
+  }
+  result
+}, by = user_id]
+email_data[, days_since_last_session := {
+  # Get indices where investment occurred
+  inv_idx <- which(web_or_app_session == 1)
+  
+  # Create a vector of the same length as the group
+  result <- rep(NA_real_, .N)
+  
+  if (length(inv_idx) > 0) {
+    # Handle first investment differently
+    if (inv_idx[1] > 1) {
+      result[1:inv_idx[1]] <- NA
+    }
+    
+    # For investments after the first one
+    if (length(inv_idx) > 1) {
+      for (i in 2:length(inv_idx)) {
+        # Fill in all rows between previous investment and current one
+        # (including the current investment row)
+        start_idx <- inv_idx[i-1] + 1
+        end_idx <- inv_idx[i]
+        result[start_idx:end_idx] <- received_email_at[inv_idx[i-1]]
+      }
+      
+      # Fill remaining rows after last investment
+      if (inv_idx[length(inv_idx)] < .N) {
+        result[(inv_idx[length(inv_idx)] + 1):.N] <- received_email_at[inv_idx[length(inv_idx)]]
+      }
+    }
+  }
+  result
+}, by = user_id]
+
+email_data <- email_data %>%
+  group_by(user_id) %>%
+  mutate(
+    days_since_last_investment = ifelse(is.na(days_since_last_investment), min(received_email_at), days_since_last_investment)
+  )
+
+email_data <- email_data %>%
+  mutate(
+    days_since_last_investment = as.numeric(difftime(received_email_at, lubridate::as_datetime(days_since_last_investment, tz = 'US/Eastern'), units = "days")),
+    days_since_last_open = as.numeric(difftime(received_email_at, lubridate::as_datetime(days_since_last_open, tz = 'US/Eastern'), units = "days")),
+    days_since_last_click = as.numeric(difftime(received_email_at, lubridate::as_datetime(days_since_last_click, tz = 'US/Eastern'), units = "days")),
+    days_since_last_session = as.numeric(difftime(received_email_at, lubridate::as_datetime(days_since_last_session, tz = 'US/Eastern'), units = "days")),
+  )
+
+
 # push
 push_data <- push_data %>%
   group_by(user_id) %>%
@@ -233,15 +404,22 @@ round(table(push_test_balanced$pred_inv, push_test_balanced$invested) / nrow(pus
 
 # split train and test at the user level, not observation
 email_uuids <- unique(email_data$user_id)
-email_train_data <- email_data[which(email_data$user_id %in% sample(email_uuids, length(email_uuids) * 0.8)),]
-email_test_data <- email_data[which(!(email_data$user_id %in% unique(email_train_data$user_id))),]
+email_train_data <- as.data.frame(email_data[which(email_data$user_id %in% sample(email_uuids, length(email_uuids) * 0.8)),])
+email_test_data <- as.data.frame(email_data[which(!(email_data$user_id %in% unique(email_train_data$user_id))),])
 
 # turn to factor to be used in downSample()
 email_train_data$invested <- as.factor(email_train_data$invested)
 
+applicable_fields <- c('user_id', 'trailing_inv_rate',
+                       'trailing_open_rate', 'trailing_click_rate',
+                       'trailing_sess_rate', 'days_since_last_investment',
+                       'days_since_last_open', 'days_since_last_click',
+                       'days_since_last_session'
+                       )
+
 # balance
 email_train_balanced <- downSample(
-  x = email_train_data[, c("user_id", "trailing_inv_rate", 'trailing_open_rate', 'trailing_click_rate', 'trailing_sess_rate')],
+  x = email_train_data[, applicable_fields],
   y = email_train_data$invested,
   yname = "invested"
 )
@@ -249,9 +427,10 @@ email_train_balanced <- downSample(
 # remove nulls
 email_train_balanced <- email_train_balanced %>% filter(complete.cases(trailing_inv_rate))
 
-# fir the logistic regression model
+# fit the logistic regression model
+formula <- as.formula(paste("invested ~", paste(applicable_fields[-1], collapse = " + ")))
 email_logit_model <- glm(
-  invested ~ trailing_inv_rate + trailing_open_rate + trailing_click_rate + trailing_sess_rate,
+  formula,
   data = email_train_balanced,
   family = binomial
 )
@@ -262,7 +441,7 @@ email_test_data$invested <- as.factor(email_test_data$invested)
 
 # balance the test
 email_test_balanced <- downSample(
-  x = email_test_data[, c("user_id", "trailing_inv_rate", 'trailing_open_rate', 'trailing_click_rate', 'trailing_sess_rate')],
+  x = email_test_data[, applicable_fields],
   y = email_test_data$invested,
   yname = "invested"
 )
@@ -279,3 +458,10 @@ round(table(email_test_balanced$pred_inv, email_test_balanced$invested) / nrow(e
 email_logit_model$coefficients
 # push
 push_logit_model$coefficients
+
+'script start at:'
+lubridate::as_datetime(script_start)
+'script start end:'
+lubridate::as_datetime(Sys.time())
+
+
