@@ -10,18 +10,12 @@ library(RPostgreSQL)
 script_start <- Sys.time()
 
 # querying the warehouse
-# drv <- dbDriver("PostgreSQL")
-# con <- dbConnect(drv, dbname = "[DB_NAME]",
-#                  host = "[DB_HOST]",
-#                  port = 5439,  # Default Redshift port
-#                  user = "[DB_USER]",
-#                  password = "[DB_PASSWORD]")
 drv <- dbDriver("PostgreSQL")
-con <- dbConnect(drv, dbname = "prod",
-                 host = "mw-redshift-prod.ces2db0use8y.us-east-2.redshift.amazonaws.com",
-                 port = 5439,  # Default Redshift port
-                 user = "dwuser_ro",
-                 password = "ercPzNjFvMiZ7SCi32nZW3H7scXYq2huQMea3BcDNUfZkVFd")
+con <- dbConnect(drv, dbname = "[DB_NAME]",
+                host = "[DB_HOST]",
+                port = 5439,  # Default Redshift port
+                user = "[DB_USER]",
+                password = "[DB_PASSWORD]")
 email_query <- "with
 
     campaigns_to_exclude_base as
