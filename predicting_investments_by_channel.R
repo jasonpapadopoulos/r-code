@@ -6,10 +6,12 @@ library(randomForest)
 library(pROC)
 library(tidyr)
 library(RPostgreSQL)
+library(data.table)
 
 script_start <- Sys.time()
 
 # querying the warehouse
+drv <- dbDriver("PostgreSQL")
 drv <- dbDriver("PostgreSQL")
 con <- dbConnect(drv, dbname = "[DB_NAME]",
                  host = "[DB_HOST]",
@@ -111,7 +113,7 @@ push_query <- "with
             and coalesce(origin, 'not braze') <> 'Braze'
             and push_name is not null
             and (message_name not like '%test%' or message_name is null and message_name <> 'quiz_push_reminder2')
-            and implied_user_id in (select distinct user_id from raw_layer.investor_offering_base limit 100)
+            and implied_user_id in (select distinct user_id from raw_layer.investor_offering_base)
         group by 1,2
         ),
     
@@ -321,7 +323,10 @@ email_data[, days_since_last_session := {
 email_data <- email_data %>%
   group_by(user_id) %>%
   mutate(
-    days_since_last_investment = ifelse(is.na(days_since_last_investment), min(received_email_at), days_since_last_investment)
+    days_since_last_investment = ifelse(is.na(days_since_last_investment), min(received_email_at), days_since_last_investment),
+    days_since_last_open = ifelse(is.na(days_since_last_open), min(received_email_at), days_since_last_open),
+    days_since_last_click = ifelse(is.na(days_since_last_investment), min(received_email_at), days_since_last_click),
+    days_since_last_session = ifelse(is.na(days_since_last_investment), min(received_email_at), days_since_last_session),
   )
 
 email_data <- email_data %>%
@@ -344,8 +349,117 @@ push_data <- push_data %>%
   ) %>%
   ungroup()
 
+setDT(push_data)
+setorder(push_data, user_id, notification_time)
 
+push_data[, days_since_last_investment := {
+  # Get indices where investment occurred
+  inv_idx <- which(invested == 1)
+  
+  # Create a vector of the same length as the group
+  result <- rep(NA_real_, .N)
+  
+  if (length(inv_idx) > 0) {
+    # Handle first investment differently
+    if (inv_idx[1] > 1) {
+      result[1:inv_idx[1]] <- NA
+    }
+    
+    # For investments after the first one
+    if (length(inv_idx) > 1) {
+      for (i in 2:length(inv_idx)) {
+        # Fill in all rows between previous investment and current one
+        # (including the current investment row)
+        start_idx <- inv_idx[i-1] + 1
+        end_idx <- inv_idx[i]
+        result[start_idx:end_idx] <- notification_time[inv_idx[i-1]]
+      }
+      
+      # Fill remaining rows after last investment
+      if (inv_idx[length(inv_idx)] < .N) {
+        result[(inv_idx[length(inv_idx)] + 1):.N] <- notification_time[inv_idx[length(inv_idx)]]
+      }
+    }
+  }
+  result
+}, by = user_id]
+push_data[, days_since_last_tap := {
+  # Get indices where investment occurred
+  inv_idx <- which(tapped_push == 1)
+  
+  # Create a vector of the same length as the group
+  result <- rep(NA_real_, .N)
+  
+  if (length(inv_idx) > 0) {
+    # Handle first investment differently
+    if (inv_idx[1] > 1) {
+      result[1:inv_idx[1]] <- NA
+    }
+    
+    # For investments after the first one
+    if (length(inv_idx) > 1) {
+      for (i in 2:length(inv_idx)) {
+        # Fill in all rows between previous investment and current one
+        # (including the current investment row)
+        start_idx <- inv_idx[i-1] + 1
+        end_idx <- inv_idx[i]
+        result[start_idx:end_idx] <- notification_time[inv_idx[i-1]]
+      }
+      
+      # Fill remaining rows after last investment
+      if (inv_idx[length(inv_idx)] < .N) {
+        result[(inv_idx[length(inv_idx)] + 1):.N] <- notification_time[inv_idx[length(inv_idx)]]
+      }
+    }
+  }
+  result
+}, by = user_id]
+push_data[, days_since_last_session := {
+  # Get indices where investment occurred
+  inv_idx <- which(app_session == 1)
+  
+  # Create a vector of the same length as the group
+  result <- rep(NA_real_, .N)
+  
+  if (length(inv_idx) > 0) {
+    # Handle first investment differently
+    if (inv_idx[1] > 1) {
+      result[1:inv_idx[1]] <- NA
+    }
+    
+    # For investments after the first one
+    if (length(inv_idx) > 1) {
+      for (i in 2:length(inv_idx)) {
+        # Fill in all rows between previous investment and current one
+        # (including the current investment row)
+        start_idx <- inv_idx[i-1] + 1
+        end_idx <- inv_idx[i]
+        result[start_idx:end_idx] <- notification_time[inv_idx[i-1]]
+      }
+      
+      # Fill remaining rows after last investment
+      if (inv_idx[length(inv_idx)] < .N) {
+        result[(inv_idx[length(inv_idx)] + 1):.N] <- notification_time[inv_idx[length(inv_idx)]]
+      }
+    }
+  }
+  result
+}, by = user_id]
 
+push_data <- push_data %>%
+  group_by(user_id) %>%
+  mutate(
+    days_since_last_investment = ifelse(is.na(days_since_last_investment), min(notification_time), days_since_last_investment),
+    days_since_last_tap = ifelse(is.na(days_since_last_tap), min(notification_time), days_since_last_tap),
+    days_since_last_session = ifelse(is.na(days_since_last_session), min(notification_time), days_since_last_session),
+  )
+
+push_data <- push_data %>%
+  mutate(
+    days_since_last_investment = as.numeric(difftime(notification_time, lubridate::as_datetime(days_since_last_investment, tz = 'US/Eastern'), units = "days")),
+    days_since_last_tap = as.numeric(difftime(notification_time, lubridate::as_datetime(days_since_last_tap, tz = 'US/Eastern'), units = "days")),
+    days_since_last_session = as.numeric(difftime(notification_time, lubridate::as_datetime(days_since_last_session, tz = 'US/Eastern'), units = "days"))
+  )
 
 ############# push model #############
 
@@ -357,9 +471,16 @@ push_test_data <- push_data[which(!(push_data$user_id %in% unique(push_train_dat
 # turn to factor to be used in downSample()
 push_train_data$invested <- as.factor(push_train_data$invested)
 
+applicable_fields <- c('user_id', 'trailing_inv_rate',
+                       'trailing_tap_rate', 'trailing_sess_rate',
+                       'days_since_last_investment', 'days_since_last_tap',
+                       'days_since_last_session'
+)
+
+
 # balance
 push_train_balanced <- downSample(
-  x = push_train_data[, c("user_id", "trailing_inv_rate", 'trailing_tap_rate', 'trailing_sess_rate')],
+  x = push_train_data[, applicable_fields],
   y = push_train_data$invested,
   yname = "invested"
 )
@@ -368,8 +489,9 @@ push_train_balanced <- downSample(
 push_train_balanced <- push_train_balanced %>% filter(complete.cases(trailing_inv_rate))
 
 # fir the logistic regression model
+formula <- as.formula(paste("invested ~", paste(applicable_fields[-1], collapse = " + ")))
 push_logit_model <- glm(
-  invested ~ trailing_inv_rate + trailing_tap_rate + trailing_sess_rate,
+  formula,
   data = push_train_balanced,
   family = binomial
 )
@@ -380,7 +502,7 @@ push_test_data$invested <- as.factor(push_test_data$invested)
 
 # balance the test
 push_test_balanced <- downSample(
-  x = push_test_data[, c("user_id", "trailing_inv_rate", 'trailing_tap_rate', 'trailing_sess_rate')],
+  x = push_test_data[, applicable_fields],
   y = push_test_data$invested,
   yname = "invested"
 )
