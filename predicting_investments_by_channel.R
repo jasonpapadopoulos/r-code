@@ -463,61 +463,6 @@ push_data <- push_data %>%
     days_since_last_session = as.numeric(difftime(notification_time, lubridate::as_datetime(days_since_last_session, tz = 'US/Eastern'), units = "days"))
   )
 
-############# push model #############
-
-# split train and test at the user level, not observation
-push_uuids <- unique(push_data$user_id)
-push_train_data <- push_data[which(push_data$user_id %in% sample(push_uuids, length(push_uuids) * 0.8)),]
-push_test_data <- push_data[which(!(push_data$user_id %in% unique(push_train_data$user_id))),]
-
-# turn to factor to be used in downSample()
-push_train_data$invested <- as.factor(push_train_data$invested)
-
-applicable_fields <- c('user_id', 'trailing_inv_rate',
-                       'trailing_tap_rate', 'trailing_sess_rate',
-                       'days_since_last_investment', 'days_since_last_tap',
-                       'days_since_last_session'
-)
-
-
-# balance
-push_train_balanced <- downSample(
-  x = push_train_data[, applicable_fields],
-  y = push_train_data$invested,
-  yname = "invested"
-)
-
-# remove nulls
-push_train_balanced <- push_train_balanced %>% filter(complete.cases(trailing_inv_rate))
-
-# fir the logistic regression model
-formula <- as.formula(paste("invested ~", paste(applicable_fields[-1], collapse = " + ")))
-push_logit_model <- glm(
-  formula,
-  data = push_train_balanced,
-  family = binomial
-)
-summary(push_logit_model)
-
-# again, turn to factor to be used in downSample()
-push_test_data$invested <- as.factor(push_test_data$invested)
-
-# balance the test
-push_test_balanced <- downSample(
-  x = push_test_data[, applicable_fields],
-  y = push_test_data$invested,
-  yname = "invested"
-)
-
-# fit probabilities, classify, and create confusion matrix
-push_test_balanced$prob_logit <- predict(push_logit_model, newdata = push_test_balanced, type = "response")
-push_test_balanced$pred_inv <- ifelse(push_test_balanced$prob_logit >= 0.5, 1, 0)
-table(push_test_balanced$pred_inv, push_test_balanced$invested) # counts
-round(table(push_test_balanced$pred_inv, push_test_balanced$invested) / nrow(push_test_balanced), 2) # %s
-
-
-
-
 ############# email model #############
 
 # split train and test at the user level, not observation
@@ -528,16 +473,16 @@ email_test_data <- as.data.frame(email_data[which(!(email_data$user_id %in% uniq
 # turn to factor to be used in downSample()
 email_train_data$invested <- as.factor(email_train_data$invested)
 
-applicable_fields <- c('user_id', 'trailing_inv_rate',
+email_applicable_fields <- c('user_id', 'trailing_inv_rate',
                        'trailing_open_rate', 'trailing_click_rate',
                        'trailing_sess_rate', 'days_since_last_investment',
                        'days_since_last_open', 'days_since_last_click',
                        'days_since_last_session'
-                       )
+)
 
 # balance
 email_train_balanced <- downSample(
-  x = email_train_data[, applicable_fields],
+  x = email_train_data[, email_applicable_fields],
   y = email_train_data$invested,
   yname = "invested"
 )
@@ -546,9 +491,9 @@ email_train_balanced <- downSample(
 email_train_balanced <- email_train_balanced %>% filter(complete.cases(trailing_inv_rate))
 
 # fit the logistic regression model
-formula <- as.formula(paste("invested ~", paste(applicable_fields[-1], collapse = " + ")))
+email_formula <- as.formula(paste("invested ~", paste(email_applicable_fields[-1], collapse = " + ")))
 email_logit_model <- glm(
-  formula,
+  email_formula,
   data = email_train_balanced,
   family = binomial
 )
@@ -559,7 +504,7 @@ email_test_data$invested <- as.factor(email_test_data$invested)
 
 # balance the test
 email_test_balanced <- downSample(
-  x = email_test_data[, applicable_fields],
+  x = email_test_data[, email_applicable_fields],
   y = email_test_data$invested,
   yname = "invested"
 )
@@ -570,12 +515,89 @@ email_test_balanced$pred_inv <- ifelse(email_test_balanced$prob_logit >= 0.5, 1,
 table(email_test_balanced$pred_inv, email_test_balanced$invested) # counts
 round(table(email_test_balanced$pred_inv, email_test_balanced$invested) / nrow(email_test_balanced), 2) # %s
 
+# full model for out-of-sample predictions
+email_formula <- as.formula(paste("invested ~", paste(email_applicable_fields[-1], collapse = " + ")))
+email_data_balanced <- rbind(email_test_balanced %>% select(-prob_logit, -pred_inv), email_train_balanced)
+
+full_email_logit_model <- glm(
+  email_formula,
+  data = email_data_balanced,
+  family = binomial
+)
+summary(full_email_logit_model)
+
+
+############# push model #############
+
+# split train and test at the user level, not observation
+push_uuids <- unique(push_data$user_id)
+push_train_data <- push_data[which(push_data$user_id %in% sample(push_uuids, length(push_uuids) * 0.8)),]
+push_test_data <- push_data[which(!(push_data$user_id %in% unique(push_train_data$user_id))),]
+
+# turn to factor to be used in downSample()
+push_train_data$invested <- as.factor(push_train_data$invested)
+
+push_applicable_fields <- c('user_id', 'trailing_inv_rate',
+                       'trailing_tap_rate', 'trailing_sess_rate',
+                       'days_since_last_investment', 'days_since_last_tap',
+                       'days_since_last_session'
+)
+
+
+# balance
+push_train_balanced <- downSample(
+  x = push_train_data[, push_applicable_fields],
+  y = push_train_data$invested,
+  yname = "invested"
+)
+
+# remove nulls
+push_train_balanced <- push_train_balanced %>% filter(complete.cases(trailing_inv_rate))
+
+# fir the logistic regression model
+push_formula <- as.formula(paste("invested ~", paste(push_applicable_fields[-1], collapse = " + ")))
+push_logit_model <- glm(
+  push_formula,
+  data = push_train_balanced,
+  family = binomial
+)
+summary(push_logit_model)
+
+# again, turn to factor to be used in downSample()
+push_test_data$invested <- as.factor(push_test_data$invested)
+
+# balance the test
+push_test_balanced <- downSample(
+  x = push_test_data[, push_applicable_fields],
+  y = push_test_data$invested,
+  yname = "invested"
+)
+
+# fit probabilities, classify, and create confusion matrix
+push_test_balanced$prob_logit <- predict(push_logit_model, newdata = push_test_balanced, type = "response")
+push_test_balanced$pred_inv <- ifelse(push_test_balanced$prob_logit >= 0.5, 1, 0)
+table(push_test_balanced$pred_inv, push_test_balanced$invested) # counts
+round(table(push_test_balanced$pred_inv, push_test_balanced$invested) / nrow(push_test_balanced), 2) # %s
+
+# full model for out-of-sample predictions
+push_formula <- as.formula(paste("invested ~", paste(push_applicable_fields[-1], collapse = " + ")))
+push_data_balanced <- rbind(push_test_balanced %>% select(-prob_logit, -pred_inv), push_train_balanced)
+
+full_push_logit_model <- glm(
+  push_formula,
+  data = push_data_balanced,
+  family = binomial
+)
+summary(full_push_logit_model)
+
+
+
 
 ############# coefficients of the models #############
 # email
-email_logit_model$coefficients
+full_email_logit_model$coefficients
 # push
-push_logit_model$coefficients
+full_push_logit_model$coefficients
 
 'script start at:'
 lubridate::as_datetime(script_start)
