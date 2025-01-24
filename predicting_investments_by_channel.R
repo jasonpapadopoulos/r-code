@@ -48,6 +48,7 @@ email_query <- "with
             raw_layer.attributed_contributions
         where
             order_attribution not in ('Unknown', 'Adviser Attributed')
+              and is_valid = 1
         ),
     
     emails_base as
@@ -90,6 +91,7 @@ push_query <- "with
             raw_layer.attributed_contributions
         where
             order_attribution not in ('Unknown', 'Adviser Attributed')
+              and is_valid = 1
         ),
 
     pushes_base as 
