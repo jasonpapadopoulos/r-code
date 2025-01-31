@@ -626,7 +626,7 @@ shinyApp(ui = ui, server = server)
 #   x1 <- eventReactive(input$refresh, {
 #     
 #     res = POST("https://redash.masterworks.com/api/queries/1390/results",
-#                add_headers(Authorization = "Q9XC9rzBvPxHDa5loyjnDC5iU8j7cAnKR1gYxcTD"),
+#                add_headers(Authorization = "Q9XC****"),
 #                body = list(max_age = 0, parameters = list(offering = input$offering, date_range_start = '2023-01-01', date_range_end = '2023-01-10')), encode = "json")
 #                # body = list(max_age = 0, parameters = list(offering = 'Masterworks 183', date_range_start = '2023-01-02', date_range_end = '2023-01-05')), encode = "json")
 #     rawToChar(res$content)
@@ -640,13 +640,13 @@ shinyApp(ui = ui, server = server)
 #     # paste("https://redash.masterworks.com/api/jobs/", data$job$id, sep="")
 #     while (data$job$status != 3 & data$job$status != 4) {
 #       res <- GET(paste("https://redash.masterworks.com/api/jobs/", data$job$id, sep=""),
-#                  add_headers(Authorization = "Q9XC9rzBvPxHDa5loyjnDC5iU8j7cAnKR1gYxcTD"))
+#                  add_headers(Authorization = "Q9XC****"))
 #       rawToChar(res$content)
 #       data <- fromJSON(rawToChar(res$content))
 #     }
 #     
 #     res = GET(paste(paste("https://redash.masterworks.com/api/queries/1390/results/", data$job$query_result_id, sep=""), ".json", sep=""),
-#               add_headers(Authorization = "Q9XC9rzBvPxHDa5loyjnDC5iU8j7cAnKR1gYxcTD"))
+#               add_headers(Authorization = "Q9XC****"))
 #     # rawToChar(res$content)
 #     data <- fromJSON(rawToChar(res$content))
 #     
